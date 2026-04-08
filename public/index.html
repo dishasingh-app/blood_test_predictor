@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Valeo AI — Biomarker POC</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f0; color: #1a1a1a; min-height: 100vh; }
+  header { background: #fff; border-bottom: 1px solid #e8e8e0; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .logo { font-size: 20px; font-weight: 600; letter-spacing: -0.5px; }
+  .logo span { color: #1D9E75; }
+  .badge { font-size: 11px; background: #E1F5EE; color: #0F6E56; border: 1px solid #9FE1CB; padding: 3px 10px; border-radius: 20px; font-weight: 500; }
+  main { max-width: 760px; margin: 40px auto; padding: 0 20px; }
+  h1 { font-size: 26px; font-weight: 600; margin-bottom: 6px; letter-spacing: -0.5px; }
+  .subtitle { color: #666; font-size: 14px; margin-bottom: 28px; }
+  .input-card { background: #fff; border: 1px solid #e0e0d8; border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .input-label { font-size: 12px; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .input-row { display: flex; gap: 10px; }
+  #concern-input { flex: 1; padding: 10px 14px; border: 1.5px solid #d0d0c8; border-radius: 10px; font-size: 14px; color: #1a1a1a; background: #fafaf8; outline: none; transition: border-color 0.15s; }
+  #concern-input:focus { border-color: #1D9E75; background: #fff; }
+  #suggest-btn { background: #1D9E75; color: #fff; border: none; padding: 10px 20px; border-radius: 10px; font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background 0.15s; }
+  #suggest-btn:hover { background: #0F6E56; }
+  #suggest-btn:disabled { background: #9FE1CB; cursor: not-allowed; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .chip { font-size: 12px; padding: 5px 12px; border-radius: 20px; background: #f0f0e8; border: 1px solid #d8d8d0; color: #444; cursor: pointer; transition: all 0.12s; }
+  .chip:hover { background: #E1F5EE; border-color: #9FE1CB; color: #0F6E56; }
+  .results-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .results-title { font-size: 16px; font-weight: 600; }
+  .meta { font-size: 12px; color: #888; }
+  .card { background: #fff; border: 1px solid #e0e0d8; border-radius: 12px; padding: 16px; margin-bottom: 10px; display: flex; gap: 14px; align-items: flex-start; transition: border-color 0.15s; }
+  .card:hover { border-color: #1D9E75; }
+  .priority-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+  .dot-high { background: #1D9E75; }
+  .dot-medium { background: #EF9F27; }
+  .card-body { flex: 1; }
+  .card-name { font-size: 15px; font-weight: 600; margin-bottom: 3px; }
+  .card-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .card-category { font-size: 11px; color: #888; background: #f0f0e8; padding: 2px 8px; border-radius: 10px; }
+  .card-priority { font-size: 11px; font-weight: 600; }
+  .priority-high { color: #0F6E56; }
+  .priority-medium { color: #BA7517; }
+  .card-reason { font-size: 13px; color: #444; line-height: 1.5; }
+  .card-price { font-size: 14px; font-weight: 600; color: #1a1a1a; flex-shrink: 0; }
+  .total-bar { background: #E1F5EE; border: 1px solid #9FE1CB; border-radius: 12px; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
+  .total-label { font-size: 14px; color: #0F6E56; font-weight: 500; }
+  .total-amount { font-size: 20px; font-weight: 700; color: #085041; }
+  .loading { text-align: center; padding: 40px 0; color: #888; font-size: 14px; }
+  .spinner { display: inline-block; width: 24px; height: 24px; border: 2.5px solid #e0e0d8; border-top-color: #1D9E75; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 10px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error { background: #fff0f0; border: 1px solid #f0c0c0; border-radius: 10px; padding: 14px; color: #a33; font-size: 13px; }
+  .empty { display: none; }
+  .debug-block { background: #f8f8f0; border: 1px solid #e0e0d0; border-radius: 8px; padding: 12px 14px; margin-top: 20px; font-size: 11px; font-family: monospace; color: #555; white-space: pre-wrap; word-break: break-all; }
+  .debug-title { font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">feel<span>valeo</span></span>
+  <span class="badge">AI Biomarker POC</span>
+</header>
+
+<main>
+  <h1>What's on your mind?</h1>
+  <p class="subtitle">Tell us your concern — our AI will scan all available biomarkers and suggest the most relevant tests.</p>
+
+  <div class="input-card">
+    <div class="input-label">Your health concern</div>
+    <div class="input-row">
+      <input id="concern-input" type="text" placeholder="e.g. I have hairfall, I feel tired all the time, I want a fertility check…" />
+      <button id="suggest-btn" onclick="getSuggestions()">Suggest tests</button>
+    </div>
+    <div class="chips">
+      <span class="chip" onclick="prefill('I have hairfall')">Hairfall</span>
+      <span class="chip" onclick="prefill('I feel tired all the time')">Fatigue</span>
+      <span class="chip" onclick="prefill('I want a fertility check')">Fertility</span>
+      <span class="chip" onclick="prefill('I have been gaining weight')">Weight gain</span>
+      <span class="chip" onclick="prefill('I have digestive issues and bloating')">Digestion</span>
+      <span class="chip" onclick="prefill('I want a general health checkup')">General health</span>
+      <span class="chip" onclick="prefill('I have acne and irregular periods')">PCOS / Acne</span>
+      <span class="chip" onclick="prefill('I have joint pain and fatigue')">Joint pain</span>
+    </div>
+  </div>
+
+  <div id="output"></div>
+</main>
+
+<script>
+  function prefill(text) {
+    document.getElementById('concern-input').value = text;
+    getSuggestions();
+  }
+
+  document.getElementById('concern-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') getSuggestions();
+  });
+
+  async function getSuggestions() {
+    const concern = document.getElementById('concern-input').value.trim();
+    if (!concern) return;
+
+    const btn = document.getElementById('suggest-btn');
+    const output = document.getElementById('output');
+
+    btn.disabled = true;
+    btn.textContent = 'Analysing…';
+    output.innerHTML = `<div class="loading"><div class="spinner"></div><br>Scanning ${await getBiomarkerCount()} biomarkers…</div>`;
+
+    try {
+      const res = await fetch('/api/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ concern }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        output.innerHTML = `<div class="error">${data.error || 'Something went wrong. Check the server logs.'}</div>`;
+        return;
+      }
+
+      renderResults(data);
+    } catch (err) {
+      output.innerHTML = `<div class="error">Network error: ${err.message}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Suggest tests';
+    }
+  }
+
+  async function getBiomarkerCount() {
+    try {
+      const r = await fetch('/api/health');
+      const d = await r.json();
+      return d.biomarkersLoaded || '…';
+    } catch { return '…'; }
+  }
+
+  function renderResults(data) {
+    const total = data.suggestions.reduce((s, b) => s + (b.price || 0), 0);
+
+    const cards = data.suggestions.map(b => `
+      <div class="card">
+        <div class="priority-dot dot-${b.priority}"></div>
+        <div class="card-body">
+          <div class="card-name">${b.name}</div>
+          <div class="card-meta">
+            <span class="card-category">${b.category}</span>
+            <span class="card-priority priority-${b.priority}">${b.priority === 'high' ? '● Recommended' : '○ Also useful'}</span>
+          </div>
+          <div class="card-reason">${b.reason}</div>
+        </div>
+        <div class="card-price">AED ${b.price}</div>
+      </div>
+    `).join('');
+
+    const debugInfo = JSON.stringify({
+      model: data.model,
+      biomarkersScanned: data.totalBiomarkersScanned,
+      inputTokens: data.usage?.input_tokens,
+      outputTokens: data.usage?.output_tokens,
+    }, null, 2);
+
+    document.getElementById('output').innerHTML = `
+      <div class="results-header">
+        <div class="results-title">Top 5 biomarkers for "<em>${data.concern}</em>"</div>
+        <div class="meta">Scanned ${data.totalBiomarkersScanned} biomarkers</div>
+      </div>
+      ${cards}
+      <div class="total-bar">
+        <span class="total-label">Estimated package total</span>
+        <span class="total-amount">AED ${total}</span>
+      </div>
+      <div class="debug-title" style="margin-top:20px">API response metadata</div>
+      <div class="debug-block">${debugInfo}</div>
+    `;
+  }
+</script>
+</body>
+</html>
