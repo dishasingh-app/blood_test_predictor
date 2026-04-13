@@ -12,8 +12,10 @@
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.85.0",
+    "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.4.1",
     "express": "^5.2.1",
+    "node-fetch": "^2.7.0",
     "openai": "^6.33.0"
   }
 }

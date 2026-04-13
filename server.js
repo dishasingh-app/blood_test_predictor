@@ -1,33 +1,36 @@
 require("dotenv").config();
 const express = require("express");
-const fs = require("fs");
-const OpenAI = require("openai");
+const fetch = require("node-fetch");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const biomarkers = require("./biomarkers");
 
 const app = express();
 app.use(express.json());
 app.use(express.static("public"));
 
-console.log(process.env.OPENAI_API_KEY);
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// ─────────────────────────────────────────────
+// Gemini setup
+// ─────────────────────────────────────────────
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // ─────────────────────────────────────────────
-// Build biomarker context (same as yours, trimmed slightly)
+// Build biomarker context
 // ─────────────────────────────────────────────
 function buildBiomarkerContext(list) {
   return list
     .map(
-      (b) => `${b.id} | ${b.name} | ${b.category} | ${b.conditions.join(", ")} | ${b.description}`
+      (b) =>
+        `${b.id} | ${b.name} | ${b.category} | ${b.conditions.join(", ")} | ${b.description}`
     )
     .join("\n");
 }
 
-const BIOMARKER_CONTEXT = buildBiomarkerContext(biomarkers);
+const BIOMARKER_CONTEXT = buildBiomarkerContext(
+  biomarkers.slice(0, 100)
+);
 
 // ─────────────────────────────────────────────
-// Prompt
+// Prompt builder
 // ─────────────────────────────────────────────
 function buildPrompt(concern) {
   return `
@@ -49,8 +52,13 @@ Rules:
 - DO NOT invent anything
 - Top 3 → "high", next 2 → "medium"
 - Keep reasons simple (1–2 lines)
+- Rank biomarkers like a senior doctor would
+- Prefer commonly used first-line screening biomarkers before advanced or niche tests.
+- RETURN STRICT JSON ONLY
+- NO markdown
+- NO explanation
 
-Return STRICT JSON:
+Format:
 {
   "biomarkers": [
     {
@@ -64,6 +72,73 @@ Return STRICT JSON:
 }
 
 // ─────────────────────────────────────────────
+// Extract JSON safely
+// ─────────────────────────────────────────────
+function extractJSON(text) {
+  try {
+    const cleaned = text.replace(/```json|```/g, "").trim();
+    return JSON.parse(cleaned);
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error("Could not extract valid JSON");
+  }
+}
+
+// ─────────────────────────────────────────────
+// Gemini call with retry + fallback
+// ─────────────────────────────────────────────
+async function callGeminiWithFallback(prompt) {
+  const MODELS = [
+    "gemini-2.5-flash",
+    "gemini-flash-latest",
+    "gemini-2.5-pro"
+  ];
+
+  for (let i = 0; i < MODELS.length; i++) {
+    const modelName = MODELS[i];
+
+    try {
+      console.log(`Trying model: ${modelName}`);
+
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+      });
+
+      let result;
+
+      // 🔁 Retry once if 503
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          result = await model.generateContent(prompt);
+          break;
+        } catch (err) {
+          if (err.message.includes("503") && attempt === 0) {
+            console.log("Retrying due to 503...");
+            await new Promise((res) => setTimeout(res, 1000));
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      const text = result.response.text();
+
+      return { text, modelUsed: modelName };
+
+    } catch (err) {
+      console.log(`❌ Failed with ${modelName}: ${err.message}`);
+
+      if (i === MODELS.length - 1) {
+        throw err;
+      }
+
+      await new Promise((res) => setTimeout(res, 1000));
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
 // POST /api/suggest
 // ─────────────────────────────────────────────
 app.post("/api/suggest", async (req, res) => {
@@ -74,32 +149,25 @@ app.post("/api/suggest", async (req, res) => {
       return res.status(400).json({ error: "Invalid concern" });
     }
 
-    console.log(`\n[→] ${concern}`);
+    console.log(`\n[→] Concern: ${concern}`);
 
-    const response = await client.chat.completions.create({
-      model: "gpt-4.1-mini",
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: "You are a precise medical reasoning assistant.",
-        },
-        {
-          role: "user",
-          content: buildPrompt(concern),
-        },
-      ],
-    });
+    // ✅ USE FALLBACK SYSTEM
+    const { text, modelUsed } = await callGeminiWithFallback(
+      buildPrompt(concern)
+    );
 
-    const raw = response.choices[0].message.content;
-    const parsed = JSON.parse(raw);
+    let parsed;
+    try {
+      parsed = extractJSON(text);
+    } catch (e) {
+      console.error("Raw Gemini output:\n", text);
+      throw new Error("Invalid JSON from model");
+    }
 
     if (!parsed.biomarkers || parsed.biomarkers.length !== 5) {
       throw new Error("Invalid output length");
     }
 
-    // Map with source-of-truth data
     const enriched = parsed.biomarkers.map((item) => {
       const match = biomarkers.find((b) => b.id === item.id);
 
@@ -122,11 +190,12 @@ app.post("/api/suggest", async (req, res) => {
       concern,
       suggestions: enriched,
       totalBiomarkersScanned: biomarkers.length,
-      model: response.model,
-      usage: response.usage,
+      model: modelUsed, // ✅ dynamic
     });
+
   } catch (err) {
     console.error("[ERROR]", err.message);
+
     res.status(500).json({
       error: "AI failed to generate valid response",
     });
@@ -134,17 +203,20 @@ app.post("/api/suggest", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// Health + debug endpoints (same as yours)
+// Debug endpoints
 // ─────────────────────────────────────────────
 app.get("/api/biomarkers", (req, res) => {
-  res.json({ count: biomarkers.length, biomarkers });
+  res.json({
+    count: biomarkers.length,
+    biomarkers,
+  });
 });
 
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     biomarkersLoaded: biomarkers.length,
-    model: "gpt-4.1-mini",
+    model: "multi-model",
   });
 });
 
@@ -155,5 +227,5 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`\n✅ Server running at http://localhost:${PORT}`);
-  console.log(`Biomarkers: ${biomarkers.length}`);
+  console.log(`📊 Biomarkers loaded: ${biomarkers.length}`);
 });
