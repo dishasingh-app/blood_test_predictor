@@ -225,6 +225,18 @@ app.get("/api/health", (req, res) => {
 // ─────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
+app.get("/", (req, res) => {
+  res.json({
+    status: "ok",
+    message: "Valeo Biomarker API",
+    endpoints: [
+      "/api/suggest",
+      "/api/biomarkers",
+      "/api/health"
+    ]
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`\n✅ Server running at http://localhost:${PORT}`);
   console.log(`📊 Biomarkers loaded: ${biomarkers.length}`);
